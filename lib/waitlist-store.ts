@@ -167,7 +167,6 @@ export function isEmailRegisteredOnWaitlist(rawEmail: string): boolean {
  */
 export async function isEmailRegisteredOnWaitlistD1(rawEmail: string): Promise<boolean> {
   const email = rawEmail.toLowerCase().trim();
-  if (submissionsStore.has(email)) return true;
 
   try {
     const rows = await queryD1<{ count: number }>(
@@ -195,16 +194,6 @@ export async function saveWaitlistSubmissionD1(
 
   const id = data.docId || `wl_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const submittedAt = new Date().toISOString();
-
-  const submission: WaitlistSubmissionRecord = {
-    ...data,
-    email,
-    id,
-    emailVerified: true,
-    createdAt: submittedAt,
-  };
-
-  submissionsStore.set(email, submission);
 
   let d1Success = false;
   try {
@@ -239,6 +228,15 @@ export async function saveWaitlistSubmissionD1(
   if (!d1Success) {
     return { success: false, error: "Failed to write record to Cloudflare D1 database." };
   }
+
+  const submission: WaitlistSubmissionRecord = {
+    ...data,
+    email,
+    id,
+    emailVerified: true,
+    createdAt: submittedAt,
+  };
+  submissionsStore.set(email, submission);
 
   verifiedEmails.delete(email);
   return { success: true, id };

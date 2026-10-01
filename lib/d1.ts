@@ -72,9 +72,31 @@ function formatSqlWithParams(sql: string, params: any[]): string {
   });
 }
 
-async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promise<T[] | null> {
+function getApiHeaders(): Record<string, string> | null {
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-  if (!apiToken) return null;
+  if (apiToken) {
+    return {
+      Authorization: `Bearer ${apiToken}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  const globalKey = process.env.CLOUDFLARE_GLOBAL_API_KEY;
+  const email = process.env.CLOUDFLARE_EMAIL || process.env.GMAIL_USER;
+  if (globalKey && email) {
+    return {
+      "X-Auth-Email": email,
+      "X-Auth-Key": globalKey,
+      "Content-Type": "application/json",
+    };
+  }
+
+  return null;
+}
+
+async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promise<T[] | null> {
+  const headers = getApiHeaders();
+  if (!headers) return null;
 
   try {
     const singleLineSql = sql.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
@@ -82,10 +104,7 @@ async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promis
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({ sql: singleLineSql, params }),
       }
     );
@@ -101,8 +120,8 @@ async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promis
 }
 
 async function executeViaCloudflareApi(sql: string, params: any[] = []): Promise<boolean> {
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-  if (!apiToken) return false;
+  const headers = getApiHeaders();
+  if (!headers) return false;
 
   try {
     const singleLineSql = sql.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
@@ -110,10 +129,7 @@ async function executeViaCloudflareApi(sql: string, params: any[] = []): Promise
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({ sql: singleLineSql, params }),
       }
     );
