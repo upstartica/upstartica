@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 // import Navbar from "./components/landing/Navbar";
 // import "./components/landing/Navbar.css";
-
-
-
-// import Preloader from "./components/ui/Preloader";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -47,7 +44,14 @@ export default function RootLayout({
         {/* <Preloader /> */}
         {/* <Navbar /> */}
         {children}
+        <Script
+          defer
+          src="https://static.cloudflareinsights.com/beacon.min.js"
+          data-cf-beacon='{"token": "fe9600a57303443ab0af9d39d122c55c"}'
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
 }
+
