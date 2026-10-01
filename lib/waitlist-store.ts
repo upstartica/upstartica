@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { queryD1, executeD1 } from "@/lib/d1";
+import { queryD1, executeD1, executeD1Changes } from "@/lib/d1";
 
 export type OtpRecord = {
   email: string;
@@ -82,6 +82,8 @@ export function generateRandomOtp(): string {
 
 /**
  * Creates and stores a new OTP for the given email address.
+ * The cooldown check and the write are a single atomic upsert, so concurrent
+ * requests cannot each get past the cooldown.
  */
 export async function generateAndStoreOtp(rawEmail: string): Promise<{
   otp: string;
@@ -90,32 +92,50 @@ export async function generateAndStoreOtp(rawEmail: string): Promise<{
 }> {
   const email = rawEmail.toLowerCase().trim();
   const now = Date.now();
-
-  const existing = await getOtpRow(email);
-  if (existing) {
-    const elapsed = now - existing.last_sent_at;
-    if (elapsed < RESEND_COOLDOWN_MS) {
-      const cooldownRemaining = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
-      return {
-        otp: "",
-        cooldownRemaining,
-        error: `Please wait ${cooldownRemaining} seconds before requesting a new OTP.`,
-      };
-    }
-  }
+  await ensureOtpTable();
 
   const otp = generateRandomOtp();
-  await executeD1(
-    `INSERT OR REPLACE INTO waitlist_otp (email, otp, expires_at, last_sent_at, attempts, verified_until)
-     VALUES (?, ?, ?, ?, 0, 0)`,
-    [email, otp, now + OTP_TTL_MS, now]
+  const changes = await executeD1Changes(
+    `INSERT INTO waitlist_otp (email, otp, expires_at, last_sent_at, attempts, verified_until)
+     VALUES (?, ?, ?, ?, 0, 0)
+     ON CONFLICT(email) DO UPDATE SET
+       otp = excluded.otp,
+       expires_at = excluded.expires_at,
+       last_sent_at = excluded.last_sent_at,
+       attempts = 0,
+       verified_until = 0
+     WHERE waitlist_otp.last_sent_at <= ?`,
+    [email, otp, now + OTP_TTL_MS, now, now - RESEND_COOLDOWN_MS]
   );
+
+  if (changes === 0) {
+    const existing = await getOtpRow(email);
+    const elapsed = now - (existing?.last_sent_at ?? 0);
+    const cooldownRemaining = Math.max(1, Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000));
+    return {
+      otp: "",
+      cooldownRemaining,
+      error: `Please wait ${cooldownRemaining} seconds before requesting a new OTP.`,
+    };
+  }
 
   return { otp };
 }
 
 /**
+ * Removes a stored OTP, e.g. when the email could not be sent, so the user is
+ * not locked out by the resend cooldown.
+ */
+export async function discardOtp(rawEmail: string): Promise<void> {
+  const email = rawEmail.toLowerCase().trim();
+  await ensureOtpTable();
+  await executeD1("DELETE FROM waitlist_otp WHERE email = ?", [email]);
+}
+
+/**
  * Verifies the OTP submitted by the user.
+ * Each guess is counted with an atomic UPDATE before it is compared, so
+ * parallel requests cannot exceed MAX_VERIFY_ATTEMPTS.
  */
 export async function verifyOtpCode(
   rawEmail: string,
@@ -123,40 +143,42 @@ export async function verifyOtpCode(
 ): Promise<{ success: boolean; error?: string }> {
   const email = rawEmail.toLowerCase().trim();
   const cleanOtp = submittedOtp.trim();
-
-  const record = await getOtpRow(email);
-  if (!record || !record.otp) {
-    return { success: false, error: "No OTP request found for this email. Please request a new OTP." };
-  }
-
   const now = Date.now();
+  await ensureOtpTable();
 
-  if (now > record.expires_at) {
-    await executeD1("DELETE FROM waitlist_otp WHERE email = ?", [email]);
-    return { success: false, error: "This OTP has expired. Please request a new OTP." };
-  }
+  const counted = await executeD1Changes(
+    `UPDATE waitlist_otp SET attempts = attempts + 1
+     WHERE email = ? AND otp != '' AND attempts < ? AND expires_at >= ?`,
+    [email, MAX_VERIFY_ATTEMPTS, now]
+  );
 
-  if (record.attempts >= MAX_VERIFY_ATTEMPTS) {
+  if (counted === 0) {
+    const record = await getOtpRow(email);
+    if (!record || !record.otp) {
+      return { success: false, error: "No OTP request found for this email. Please request a new OTP." };
+    }
     await executeD1("DELETE FROM waitlist_otp WHERE email = ?", [email]);
+    if (now > record.expires_at) {
+      return { success: false, error: "This OTP has expired. Please request a new OTP." };
+    }
     return { success: false, error: "Too many failed attempts. Please request a new OTP." };
   }
 
-  const attempts = record.attempts + 1;
+  // Marks verified only if this exact OTP is still live; also makes the code single-use.
+  const verified = await executeD1Changes(
+    `UPDATE waitlist_otp SET otp = '', verified_until = ?
+     WHERE email = ? AND otp = ?`,
+    [now + VERIFIED_TTL_MS, email, cleanOtp]
+  );
 
-  if (record.otp !== cleanOtp) {
-    await executeD1("UPDATE waitlist_otp SET attempts = ? WHERE email = ?", [attempts, email]);
-    const remainingAttempts = MAX_VERIFY_ATTEMPTS - attempts;
+  if (verified === 0) {
+    const record = await getOtpRow(email);
+    const remainingAttempts = Math.max(0, MAX_VERIFY_ATTEMPTS - (record?.attempts ?? MAX_VERIFY_ATTEMPTS));
     return {
       success: false,
       error: `Invalid verification code. ${remainingAttempts} attempt(s) remaining.`,
     };
   }
-
-  // Keep last_sent_at so the resend cooldown still applies; clear the OTP itself.
-  await executeD1(
-    "UPDATE waitlist_otp SET otp = '', attempts = ?, verified_until = ? WHERE email = ?",
-    [attempts, now + VERIFIED_TTL_MS, email]
-  );
 
   return { success: true };
 }

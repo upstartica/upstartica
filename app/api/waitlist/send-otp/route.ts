@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateAndStoreOtp } from "@/lib/waitlist-store";
+import { generateAndStoreOtp, discardOtp } from "@/lib/waitlist-store";
 import { sendOtpEmail } from "@/lib/email-service";
 
 function isValidEmail(email: string): boolean {
@@ -39,6 +39,8 @@ export async function POST(request: Request) {
     const sendResult = await sendOtpEmail(cleanEmail, result.otp);
 
     if (!sendResult.success) {
+      // Don't leave the user stuck behind the resend cooldown for an email that never went out
+      await discardOtp(cleanEmail).catch((e) => console.error("discardOtp failed:", e));
       return NextResponse.json(
         {
           success: false,
