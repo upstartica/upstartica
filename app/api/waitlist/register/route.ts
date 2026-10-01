@@ -6,7 +6,6 @@ import {
   saveWaitlistSubmissionD1,
 } from "@/lib/waitlist-store";
 import { sendWaitlistConfirmationEmail } from "@/lib/email-service";
-import { executeD1 } from "@/lib/d1";
 
 function isValidEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -71,7 +70,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!isEmailVerifiedOnServer(cleanEmail)) {
+    if (!(await isEmailVerifiedOnServer(cleanEmail))) {
       return NextResponse.json(
         {
           success: false,
@@ -155,14 +154,19 @@ export async function POST(request: Request) {
     });
 
     if (!saveRes.success) {
+      const duplicate = /already registered/i.test(saveRes.error || "");
       return NextResponse.json(
-        { success: false, message: saveRes.error || "Failed to save waitlist submission to D1 database." },
-        { status: 500 }
+        { success: false, message: saveRes.error || "We could not save your registration right now. Please try again shortly." },
+        { status: duplicate ? 409 : 500 }
       );
     }
 
-    // Send confirmation email
-    await sendWaitlistConfirmationEmail(cleanEmail, firstName.trim(), docId);
+    // Confirmation email is best-effort: the data is already saved, so never fail the request over it
+    try {
+      await sendWaitlistConfirmationEmail(cleanEmail, firstName.trim(), docId);
+    } catch (emailErr) {
+      console.error("Waitlist confirmation email failed:", emailErr);
+    }
 
     return NextResponse.json(
       {
@@ -174,9 +178,9 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Internal server error";
+    console.error("Waitlist register error:", err);
     return NextResponse.json(
-      { success: false, message: errorMsg },
+      { success: false, message: "We could not process your registration right now. Please try again shortly." },
       { status: 500 }
     );
   }
