@@ -1,0 +1,135 @@
+.courses-grid-section {
+    padding: 80px 48px;
+    background-color: #fff;
+}
+
+.courses-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 60px;
+    max-width: 1440px;
+    margin: 0 auto;
+}
+
+.course-card-wrapper {
+    position: relative;
+    height: 100%;
+}
+
+.course-card {
+    background-color: #ff8c42;
+    /* Orange background */
+    border-radius: 16px;
+    padding: 40px;
+    position: relative;
+    z-index: 2;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.course-card-shadow {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    width: 100%;
+    height: 100%;
+    background-color: #ccc;
+    /* Light gray shadow */
+    border-radius: 16px;
+    z-index: 1;
+}
+
+.course-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+}
+
+.course-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #222;
+    max-width: 60%;
+    font-family: 'Inter', sans-serif;
+}
+
+.course-icon-placeholder {
+    width: 100px;
+    height: 100px;
+}
+
+.iso-circle {
+    width: 100px;
+    height: 100px;
+    background-color: #003366;
+    /* Dark blue circle */
+    border-radius: 50%;
+    overflow: hidden;
+    border: 4px solid #3b7cb6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.course-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.8;
+}
+
+.course-description {
+    font-size: 1rem;
+    color: #333;
+    line-height: 1.6;
+    margin-bottom: 40px;
+    flex: 1;
+}
+
+.course-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: auto;
+}
+
+.student-count {
+    font-size: 0.95rem;
+    color: #444;
+    font-weight: 500;
+}
+
+.enroll-btn {
+    background-color: transparent;
+    border: 2px solid #333;
+    color: #333;
+    padding: 10px 24px;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.enroll-btn:hover {
+    background-color: #333;
+    color: #fff;
+}
+
+@media (max-width: 768px) {
+    .courses-grid {
+        grid-template-columns: 1fr;
+        gap: 40px;
+    }
+
+    .course-card-wrapper {
+        width: 100%;
+    }
+
+    .course-card-shadow {
+        display: none;
+        /* Simplify on mobile */
+    }
+}

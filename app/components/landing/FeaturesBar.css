@@ -1,0 +1,66 @@
+.features-bar {
+    background-color: #3b7cb6;
+    /* Matches the blue from design */
+    padding: 40px 0;
+    color: white;
+}
+
+.features-container {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 48px;
+    display: flex;
+    justify-content: space-between;
+    gap: 40px;
+}
+
+.feature-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    flex: 1;
+}
+
+.feature-icon-wrapper {
+    background-color: white;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+}
+
+.feature-icon {
+    color: #333;
+}
+
+.feature-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.feature-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    font-family: 'Inter', sans-serif;
+}
+
+.feature-desc {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+@media (max-width: 1024px) {
+    .features-container {
+        flex-direction: column;
+        padding: 0 24px;
+    }
+
+    .feature-item {
+        width: 100%;
+    }
+}

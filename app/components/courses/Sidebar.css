@@ -1,0 +1,65 @@
+.sidebar {
+    width: 250px;
+    flex-shrink: 0;
+    padding-right: 20px;
+    font-family: 'Inter', sans-serif;
+}
+
+.sidebar-section {
+    margin-bottom: 32px;
+}
+
+.sidebar-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: #222;
+}
+
+.sidebar-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-link {
+    display: block;
+    padding: 6px 0;
+    color: #555;
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: color 0.2s;
+}
+
+.sidebar-link:hover,
+.sidebar-link.active {
+    color: #222;
+    font-weight: 600;
+}
+
+.filter-group {
+    margin-bottom: 24px;
+}
+
+.filter-subtitle {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #333;
+}
+
+.checkbox-label,
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: #555;
+    cursor: pointer;
+}
+
+.checkbox-label input,
+.radio-label input {
+    cursor: pointer;
+}

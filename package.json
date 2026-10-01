@@ -1,0 +1,40 @@
+{
+  "name": "pp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "build:worker": "opennextjs-cloudflare build && node fix-esbuild.js",
+    "start": "next start",
+    "lint": "eslint",
+    "preview": "opennextjs-cloudflare preview",
+    "deploy": "npm run build:worker && opennextjs-cloudflare deploy"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1000.0",
+    "@aws-sdk/s3-request-presigner": "^3.1000.0",
+    "@types/nodemailer": "^8.0.2",
+    "lucide-react": "^0.553.0",
+    "next": "^16.3.8",
+    "next-auth": "^5.0.0-beta.30",
+    "nodemailer": "^10.0.10",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "recharts": "^3.6.0"
+  },
+  "devDependencies": {
+    "@opennextjs/cloudflare": "^1.19.4",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.0",
+    "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5",
+    "wrangler": "^4.86.0"
+  }
+}

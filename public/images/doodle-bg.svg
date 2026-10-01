@@ -1,0 +1,19 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" opacity="0.6">
+  <defs>
+    <pattern id="doodle-pattern" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
+      <!-- Circle -->
+      <circle cx="20" cy="20" r="5" fill="none" stroke="#94a3b8" stroke-width="2" />
+      <!-- Triangle -->
+      <path d="M60 10 L70 30 L50 30 Z" fill="none" stroke="#94a3b8" stroke-width="2" />
+      <!-- Squiggle -->
+      <path d="M10 60 Q 20 50, 30 60 T 50 60" fill="none" stroke="#94a3b8" stroke-width="2" />
+      <!-- Cross -->
+      <path d="M70 60 L90 80 M90 60 L70 80" stroke="#94a3b8" stroke-width="2" />
+      <!-- Square -->
+      <rect x="30" y="80" width="10" height="10" fill="none" stroke="#94a3b8" stroke-width="2" />
+      <!-- Dot -->
+      <circle cx="80" cy="20" r="2" fill="#94a3b8" />
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#doodle-pattern)" />
+</svg>

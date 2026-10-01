@@ -1,0 +1,76 @@
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 48px;
+  background-color: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  font-family: 'Inter', sans-serif;
+}
+
+.navbar-left .brand {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0056b3;
+  text-decoration: none;
+}
+
+.navbar-center .search-bar {
+  display: flex;
+  align-items: center;
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: #fafafa;
+  width: 280px;
+  transition: all 0.2s ease;
+}
+
+.search-bar:hover {
+  border-color: #bbb;
+}
+
+.search-icon {
+  color: #888;
+  margin-right: 8px;
+}
+
+.search-input {
+  border: none;
+  outline: none;
+  flex: 1;
+  background: transparent;
+  font-size: 0.95rem;
+  color: #333;
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: #222;
+  font-size: 0.95rem;
+  transition: color 0.2s ease;
+}
+
+.nav-link:hover {
+  color: #0056b3;
+}
+
+.signup-btn {
+  background-color: #2b74c7;
+  color: #fff;
+  font-weight: 500;
+  padding: 8px 18px;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background-color 0.2s ease;
+}
+
+.signup-btn:hover {
+  background-color: #1f5da8;
+}

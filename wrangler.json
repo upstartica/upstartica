@@ -1,0 +1,29 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"main": ".open-next/worker.js",
+	"name": "pp-app",
+	"compatibility_date": "2025-04-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"r2_buckets": [
+		{
+			"binding": "NEXT_INC_CACHE_R2_BUCKET",
+			"bucket_name": "pp-app-opennext-cache"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "upstartica",
+			"database_id": "99fbb4a5-b1db-4de3-92a6-f3e42fa4a724"
+		}
+	],
+	"images": {
+		"binding": "IMAGES"
+	}
+}
