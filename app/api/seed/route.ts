@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
-import { uploadToR2 } from '@/lib/r2';
+import { executeD1 } from '@/lib/d1';
 
 export async function GET() {
     try {
+        const now = new Date().toISOString();
+
         // 1. Dashboard Fake Stats (Learner Directory)
         const dashboardStats = {
             featuredCourses: ['Product Design', 'Web Development', 'Data Science'],
@@ -16,18 +18,25 @@ export async function GET() {
                 { name: 'Ravi Kumar', date: '25/2/2023', course: 'Advanced State Management', category: 'REACT' }
             ]
         };
-        await uploadToR2('learner/dashboard.json', JSON.stringify(dashboardStats), 'application/json');
+        await executeD1("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)", ['learner/dashboard.json', JSON.stringify(dashboardStats), now]);
 
-        // 2. Tasks / Assignments (Learner Directory)
+        // 2. Tasks / Assignments
         const assignments = [
-            { id: '1', title: 'Market Analysis Report', course: 'Financial Markets 101', dueDate: 'Today, 11:59 PM', status: 'pending', points: 100, description: 'Analyze the current trends in the S&P 500...' },
-            { id: '2', title: 'SWOT Analysis', course: 'Business Strategy', dueDate: 'Tomorrow, 5:00 PM', status: 'pending', points: 50, description: 'Perform a SWOT analysis for a chosen tech startup.' },
+            { id: '1', title: 'Market Analysis Report', course: 'Financial Markets 101', dueDate: 'Today, 11:59 PM', status: 'active', points: 100, description: 'Analyze the current trends in the S&P 500...' },
+            { id: '2', title: 'SWOT Analysis', course: 'Business Strategy', dueDate: 'Tomorrow, 5:00 PM', status: 'active', points: 50, description: 'Perform a SWOT analysis for a chosen tech startup.' },
             { id: '3', title: 'Calculus Problem Set 3', course: 'Introduction to Calculus', dueDate: 'Yesterday', status: 'overdue', points: 30, description: 'Solve problems 1-15 in Chapter 4 of the textbook.' },
-            { id: '4', title: 'History Essay', course: 'World History', dueDate: 'Completed', status: 'submitted', points: 100, grade: '95/100', description: 'Write an essay on the industrial revolution.' }
+            { id: '4', title: 'History Essay', course: 'World History', dueDate: 'Completed', status: 'submitted', points: 100, description: 'Write an essay on the industrial revolution.' }
         ];
-        await uploadToR2('learner/tasks.json', JSON.stringify(assignments), 'application/json');
 
-        // 3. Community Hub (Learner Directory)
+        for (const task of assignments) {
+            await executeD1(
+                `INSERT OR REPLACE INTO tasks (id, title, description, course, due_date, points, status, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [task.id, task.title, task.description, task.course, task.dueDate, task.points, task.status, now, now]
+            );
+        }
+
+        // 3. Community Hub
         const communityData = {
             posts: [
                 {
@@ -51,9 +60,9 @@ export async function GET() {
                 { id: '102', title: 'Private Equity Circle', members: 150, description: 'Exclusive group for PE professionals.', open: false, category: 'Exclusive' }
             ]
         };
-        await uploadToR2('learner/community.json', JSON.stringify(communityData), 'application/json');
+        await executeD1("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)", ['learner/community.json', JSON.stringify(communityData), now]);
 
-        // 4. Resources (Learner Directory)
+        // 4. Resources
         const resourcesData = {
             courseMaterials: [
                 {
@@ -72,9 +81,9 @@ export async function GET() {
                 { id: 'ln-1', title: 'Economics Lecture 1', type: 'document', size: '450 KB', updated: 'Today', author: 'Prof' }
             ]
         };
-        await uploadToR2('learner/resources.json', JSON.stringify(resourcesData), 'application/json');
+        await executeD1("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)", ['learner/resources.json', JSON.stringify(resourcesData), now]);
 
-        // 5. Meetings (Learner Directory)
+        // 5. Meetings
         const todayObj = new Date();
         const tomorrowObj = new Date();
         tomorrowObj.setDate(tomorrowObj.getDate() + 1);
@@ -84,34 +93,15 @@ export async function GET() {
             { title: "Weekly Sync", scheduledDate: formatDate(todayObj), scheduledTime: "10:00 AM", attendees: 5, meetCode: "abc-xyz", password: "" },
             { title: "Project Review", scheduledDate: formatDate(tomorrowObj), scheduledTime: "2:00 PM", attendees: 12, meetCode: "def-uvw", password: "pass" },
         ];
-        await uploadToR2('learner/meetings.json', JSON.stringify(meetings), 'application/json');
+        for (const m of meetings) {
+            await executeD1(
+                `INSERT OR REPLACE INTO meetings (title, scheduled_date, scheduled_time, attendees, meet_code, password)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [m.title, m.scheduledDate, m.scheduledTime, m.attendees, m.meetCode, m.password]
+            );
+        }
 
-        // 6. Articles and Public Content (Public Directory)
-        const articles = [
-            { id: '1', title: 'Effective Classroom Management', description: 'Strategies for maintaining a productive learning environment.', image: '/images/creative-arts-course.png', category: 'Teaching', readTime: '5 min' },
-            { id: '2', title: 'Integrating Technology in Education', description: 'Tools and methods to enhance teaching with technology.', image: '/images/meeting-room.png', category: 'EdTech', readTime: '8 min' }
-        ];
-        await uploadToR2('Public/articles.json', JSON.stringify(articles), 'application/json');
-
-        // 7. Mentor Section Seed (Mentor Directory)
-        const mentorDashboard = {
-            studentsAssigned: 15,
-            pendingReviews: 4,
-            upcomingSessions: 2
-        };
-        await uploadToR2('mentor/dashboard.json', JSON.stringify(mentorDashboard), 'application/json');
-
-        // 8. Mentor Articles (Mentor Directory)
-        const mentorArticles = [
-            { id: '1', title: 'Effective Classroom Management', description: 'Strategies for maintaining a productive learning environment.', image: '/images/creative-arts-course.png', category: 'Teaching', readTime: '5 min' },
-            { id: '2', title: 'Integrating Technology in Education', description: 'Tools and methods to enhance teaching with technology.', image: '/images/meeting-room.png', category: 'EdTech', readTime: '8 min' },
-            { id: '3', title: 'Understanding Student Learning Styles', description: 'Identifying and catering to different student learning preferences.', image: '/images/instructor-mark.png', category: 'Psychology', readTime: '6 min' },
-            { id: '4', title: 'Creating Engaging Lesson Plans', description: 'Tips for designing lessons that captivate and educate.', image: '/images/creative-arts-course.png', category: 'Planning', readTime: '4 min' },
-            { id: '5', title: 'The Future of Online Learning', description: 'Trends shaping the future of digital education.', image: '/images/meeting-room.png', category: 'Trends', readTime: '7 min' }
-        ];
-        await uploadToR2('mentor/articles.json', JSON.stringify(mentorArticles), 'application/json');
-
-        return NextResponse.json({ success: true, message: 'Data perfectly structured in Public, learner, and mentor directories.' });
+        return NextResponse.json({ success: true, message: 'All application seed data stored successfully in Cloudflare D1 Database.' });
     } catch (e: any) {
         return NextResponse.json({ success: false, error: e.message }, { status: 500 });
     }

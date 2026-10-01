@@ -206,8 +206,9 @@ export async function saveWaitlistSubmissionD1(
 
   submissionsStore.set(email, submission);
 
+  let d1Success = false;
   try {
-    await executeD1(
+    d1Success = await executeD1(
       `INSERT OR REPLACE INTO waitlist (
         doc_id, first_name, last_name, contact_number, email, age,
         foundation_importance_rating, foundational_knowledge_rating,
@@ -232,6 +233,11 @@ export async function saveWaitlistSubmissionD1(
     );
   } catch (err: any) {
     console.error("D1 waitlist insert error:", err.message);
+    return { success: false, error: `Failed to save entry to D1 database: ${err.message}` };
+  }
+
+  if (!d1Success) {
+    return { success: false, error: "Failed to write record to Cloudflare D1 database." };
   }
 
   verifiedEmails.delete(email);

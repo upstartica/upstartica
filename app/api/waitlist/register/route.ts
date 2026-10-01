@@ -138,33 +138,8 @@ export async function POST(request: Request) {
     const docId = `${namePrefix}${randomNumber}`;
     const submittedAt = new Date().toISOString();
 
-    // 1. Save directly into D1 SQLite Database
-    await executeD1(
-      `INSERT OR REPLACE INTO waitlist (
-        doc_id, first_name, last_name, contact_number, email, age,
-        foundation_importance_rating, foundational_knowledge_rating,
-        business_idea, willing_to_launch_2027, business_potential_reason,
-        can_give_three_hours, submitted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        docId,
-        firstName.trim(),
-        lastName.trim(),
-        cleanPhone,
-        cleanEmail,
-        parsedAge,
-        rating1,
-        rating2,
-        businessIdea.trim(),
-        willingToLaunchIn2027,
-        businessPotentialReason.trim(),
-        canGiveThreeHours,
-        submittedAt,
-      ]
-    );
-
-    // Save in memory waitlist store for active session
-    await saveWaitlistSubmissionD1({
+    // Save directly into D1 SQLite Database
+    const saveRes = await saveWaitlistSubmissionD1({
       docId,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
@@ -178,6 +153,13 @@ export async function POST(request: Request) {
       businessPotentialReason: businessPotentialReason.trim(),
       canGiveThreeHours,
     });
+
+    if (!saveRes.success) {
+      return NextResponse.json(
+        { success: false, message: saveRes.error || "Failed to save waitlist submission to D1 database." },
+        { status: 500 }
+      );
+    }
 
     // Send confirmation email
     await sendWaitlistConfirmationEmail(cleanEmail, firstName.trim(), docId);

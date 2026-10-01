@@ -1,12 +1,6 @@
-import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { auth } from "@/auth";
-import {
-  getAllUsers,
-  findUserByEmail,
-  uploadToR2,
-  r2Client,
-  R2_BUCKET_NAME,
-} from "@/lib/r2";
+import { getAllUsers, findUserByEmail } from "@/lib/r2";
+import { queryD1, executeD1 } from "@/lib/d1";
 import type {
   AppUserRecord,
   ChatAttachment,
@@ -17,9 +11,6 @@ import type {
   ChatMessage,
   ChatParticipant,
 } from "@/types/chat";
-
-const CHAT_STORE_KEY = "Private/chat/conversations.json";
-const CHAT_ATTACHMENT_PREFIX = "Private/chat/attachments";
 
 type ChatStore = {
   conversations: ChatConversation[];
@@ -36,41 +27,6 @@ type ChatAttachmentResponse = {
   attachment: ChatAttachment;
   bytes: Uint8Array;
 };
-
-function getErrorName(error: unknown) {
-  return error instanceof Error ? error.name : "";
-}
-
-function hasTransformToString(
-  value: unknown
-): value is { transformToString: (encoding?: string) => Promise<string> } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "transformToString" in value &&
-    typeof value.transformToString === "function"
-  );
-}
-
-function hasTransformToByteArray(
-  value: unknown
-): value is { transformToByteArray: () => Promise<Uint8Array> } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "transformToByteArray" in value &&
-    typeof value.transformToByteArray === "function"
-  );
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<Uint8Array> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Symbol.asyncIterator in value &&
-    typeof value[Symbol.asyncIterator] === "function"
-  );
-}
 
 function getUserDisplayName(user: Partial<AppUserRecord>) {
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
@@ -134,70 +90,27 @@ function normalizeChatStore(store: ChatStore): ChatStore {
   };
 }
 
-async function readBodyAsString(body: unknown) {
-  if (hasTransformToString(body)) {
-    return body.transformToString("utf-8");
-  }
-
-  if (!isAsyncIterable(body)) {
-    throw new Error("Unsupported R2 response body.");
-  }
-
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of body) {
-    chunks.push(chunk);
-  }
-
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf-8");
-}
-
-async function readBodyAsBytes(body: unknown) {
-  if (hasTransformToByteArray(body)) {
-    return body.transformToByteArray();
-  }
-
-  if (!isAsyncIterable(body)) {
-    throw new Error("Unsupported R2 response body.");
-  }
-
-  const chunks: Uint8Array[] = [];
-  for await (const chunk of body) {
-    chunks.push(chunk);
-  }
-
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
-}
-
-async function streamToJson<T>(key: string, fallback: T): Promise<T> {
-  const command = new GetObjectCommand({
-    Bucket: R2_BUCKET_NAME,
-    Key: key,
-  });
-
-  try {
-    const response = await r2Client.send(command);
-    if (!response.Body) return fallback;
-
-    return JSON.parse(await readBodyAsString(response.Body)) as T;
-  } catch (error: unknown) {
-    const errorName = getErrorName(error);
-    if (errorName === "NoSuchKey" || errorName === "NotFound") {
-      return fallback;
-    }
-    throw error;
-  }
-}
-
 async function readChatStore(): Promise<ChatStore> {
-  const store = await streamToJson<ChatStore>(CHAT_STORE_KEY, { conversations: [] });
-  return normalizeChatStore(store);
+  try {
+    const rows = await queryD1<{ value: string }>(
+      "SELECT value FROM kv_store WHERE key = ?",
+      ["chat_conversations"]
+    );
+    if (rows && rows.length > 0 && rows[0].value) {
+      const parsed = JSON.parse(rows[0].value);
+      return normalizeChatStore(parsed);
+    }
+  } catch (err: any) {
+    console.warn("Failed to read chat conversations from D1 database:", err.message);
+  }
+  return { conversations: [] };
 }
 
 async function writeChatStore(store: ChatStore) {
-  await uploadToR2(
-    CHAT_STORE_KEY,
-    JSON.stringify(normalizeChatStore(store), null, 2),
-    "application/json"
+  const normalized = normalizeChatStore(store);
+  await executeD1(
+    "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
+    ["chat_conversations", JSON.stringify(normalized), new Date().toISOString()]
   );
 }
 
@@ -373,8 +286,15 @@ export async function sendConversationMessage(
   let attachment: ChatAttachment | undefined;
   if (input.attachment) {
     const safeFileName = sanitizeFileName(input.attachment.fileName || "attachment");
-    const key = `${CHAT_ATTACHMENT_PREFIX}/${conversationId}/${crypto.randomUUID()}-${safeFileName}`;
-    await uploadToR2(key, input.attachment.bytes, input.attachment.contentType);
+    const attachmentId = crypto.randomUUID();
+    const key = `chat_attachment_${conversationId}_${attachmentId}_${safeFileName}`;
+    const base64Data = Buffer.from(input.attachment.bytes).toString("base64");
+
+    await executeD1(
+      "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
+      [key, base64Data, new Date().toISOString()]
+    );
+
     attachment = {
       key,
       fileName: input.attachment.fileName,
@@ -422,18 +342,19 @@ export async function getConversationAttachment(
     throw new Error("Attachment not found.");
   }
 
-  const command = new GetObjectCommand({
-    Bucket: R2_BUCKET_NAME,
-    Key: message.attachment.key,
-  });
-  const response = await r2Client.send(command);
+  const rows = await queryD1<{ value: string }>(
+    "SELECT value FROM kv_store WHERE key = ?",
+    [message.attachment.key]
+  );
 
-  if (!response.Body) {
-    throw new Error("Attachment content not found.");
+  if (!rows || rows.length === 0 || !rows[0].value) {
+    throw new Error("Attachment content not found in D1 database.");
   }
+
+  const bytes = Buffer.from(rows[0].value, "base64");
 
   return {
     attachment: message.attachment,
-    bytes: await readBodyAsBytes(response.Body),
+    bytes: new Uint8Array(bytes),
   };
 }
