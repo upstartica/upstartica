@@ -168,15 +168,11 @@ export function isEmailRegisteredOnWaitlist(rawEmail: string): boolean {
 export async function isEmailRegisteredOnWaitlistD1(rawEmail: string): Promise<boolean> {
   const email = rawEmail.toLowerCase().trim();
 
-  try {
-    const rows = await queryD1<{ count: number }>(
-      "SELECT count(*) as count FROM waitlist WHERE LOWER(email) = ?",
-      [email]
-    );
-    return (rows[0]?.count || 0) > 0;
-  } catch {
-    return false;
-  }
+  const rows = await queryD1<{ count: number }>(
+    "SELECT count(*) as count FROM waitlist WHERE LOWER(email) = ?",
+    [email]
+  );
+  return (rows[0]?.count || 0) > 0;
 }
 
 /**
@@ -198,7 +194,7 @@ export async function saveWaitlistSubmissionD1(
   let d1Success = false;
   try {
     d1Success = await executeD1(
-      `INSERT OR REPLACE INTO waitlist (
+      `INSERT INTO waitlist (
         doc_id, first_name, last_name, contact_number, email, age,
         foundation_importance_rating, foundational_knowledge_rating,
         business_idea, willing_to_launch_2027, business_potential_reason,
@@ -222,11 +218,14 @@ export async function saveWaitlistSubmissionD1(
     );
   } catch (err: any) {
     console.error("D1 waitlist insert error:", err.message);
-    return { success: false, error: `Failed to save entry to D1 database: ${err.message}` };
+    if (/UNIQUE|constraint/i.test(err.message || "")) {
+      return { success: false, error: "This email address is already registered on our waitlist!" };
+    }
+    return { success: false, error: "We could not save your registration right now. Please try again shortly." };
   }
 
   if (!d1Success) {
-    return { success: false, error: "Failed to write record to Cloudflare D1 database." };
+    return { success: false, error: "We could not save your registration right now. Please try again shortly." };
   }
 
   const submission: WaitlistSubmissionRecord = {

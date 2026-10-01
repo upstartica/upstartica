@@ -32,11 +32,12 @@ export async function queryD1<T = any>(sql: string, params: any[] = []): Promise
     return (res.results as T[]) || [];
   }
 
-  // Try Cloudflare REST API first if token is available
+  // Cloudflare REST API (works anywhere, e.g. Vercel) when credentials are configured
   const apiRes = await queryViaCloudflareApi<T>(sql, params);
   if (apiRes !== null) return apiRes;
 
-  // Fallback for local dev: query live REMOTE Cloudflare D1 database via wrangler CLI
+  // Fallback for local dev only: query live REMOTE Cloudflare D1 database via wrangler CLI
+  assertLocalFallbackAllowed();
   return await fallbackRemoteQuery<T>(sql, params);
 }
 
@@ -52,12 +53,25 @@ export async function executeD1(sql: string, params: any[] = []): Promise<boolea
     return true;
   }
 
-  // Try Cloudflare REST API first if token is available
+  // Cloudflare REST API (works anywhere, e.g. Vercel) when credentials are configured
   const apiRes = await executeViaCloudflareApi(sql, params);
   if (apiRes) return true;
 
-  // Fallback for local dev: write directly to live REMOTE Cloudflare D1 database via wrangler CLI
+  // Fallback for local dev only: write to live REMOTE Cloudflare D1 database via wrangler CLI
+  assertLocalFallbackAllowed();
   return await fallbackRemoteExecute(sql, params);
+}
+
+/**
+ * The wrangler CLI fallback only works on a developer machine. In production
+ * (Vercel etc.) fail loudly with an actionable message instead of silently.
+ */
+function assertLocalFallbackAllowed(): void {
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    throw new Error(
+      "D1 is not reachable: set CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_DATABASE_ID in the environment."
+    );
+  }
 }
 
 function formatSqlWithParams(sql: string, params: any[]): string {
@@ -94,13 +108,14 @@ function getApiHeaders(): Record<string, string> | null {
   return null;
 }
 
-async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promise<T[] | null> {
+async function runCloudflareApi(sql: string, params: any[]): Promise<any[] | null> {
   const headers = getApiHeaders();
   if (!headers) return null;
 
+  const singleLineSql = sql.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  let res: Response;
   try {
-    const singleLineSql = sql.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
-    const res = await fetch(
+    res = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`,
       {
         method: "POST",
@@ -108,38 +123,28 @@ async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promis
         body: JSON.stringify({ sql: singleLineSql, params }),
       }
     );
-    if (!res.ok) return null;
-    const json = await res.json();
-    if (json.success && json.result && json.result[0]?.results) {
-      return json.result[0].results as T[];
-    }
   } catch (e: any) {
-    console.warn("Cloudflare REST API query warning:", e.message);
+    throw new Error(`Cloudflare D1 API request failed: ${e.message}`);
   }
-  return null;
+
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) {
+    const detail = json?.errors?.map((x: any) => `${x.code}: ${x.message}`).join("; ") || `HTTP ${res.status}`;
+    console.error("Cloudflare D1 API error:", detail);
+    throw new Error(`Cloudflare D1 API error (${detail})`);
+  }
+  return json.result || [];
+}
+
+async function queryViaCloudflareApi<T>(sql: string, params: any[] = []): Promise<T[] | null> {
+  const result = await runCloudflareApi(sql, params);
+  if (result === null) return null;
+  return (result[0]?.results as T[]) || [];
 }
 
 async function executeViaCloudflareApi(sql: string, params: any[] = []): Promise<boolean> {
-  const headers = getApiHeaders();
-  if (!headers) return false;
-
-  try {
-    const singleLineSql = sql.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${DATABASE_ID}/query`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ sql: singleLineSql, params }),
-      }
-    );
-    if (!res.ok) return false;
-    const json = await res.json();
-    return !!json.success;
-  } catch (e: any) {
-    console.warn("Cloudflare REST API execute warning:", e.message);
-  }
-  return false;
+  const result = await runCloudflareApi(sql, params);
+  return result !== null;
 }
 
 async function fallbackRemoteQuery<T>(sql: string, params: any[] = []): Promise<T[]> {
