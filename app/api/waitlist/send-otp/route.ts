@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const cleanEmail = email.trim().toLowerCase();
 
     // Generate & store OTP server-side
-    const result = generateAndStoreOtp(cleanEmail);
+    const result = await generateAndStoreOtp(cleanEmail);
 
     if (result.error) {
       return NextResponse.json(
@@ -56,9 +56,9 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Internal server error";
+    console.error("Waitlist send-otp error:", err);
     return NextResponse.json(
-      { success: false, message: errorMsg },
+      { success: false, message: "We could not send a verification code right now. Please try again shortly." },
       { status: 500 }
     );
   }
