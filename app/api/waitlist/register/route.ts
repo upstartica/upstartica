@@ -70,7 +70,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!isEmailVerifiedOnServer(cleanEmail)) {
+    if (!(await isEmailVerifiedOnServer(cleanEmail))) {
       return NextResponse.json(
         {
           success: false,

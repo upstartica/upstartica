@@ -66,6 +66,26 @@ export async function executeD1(sql: string, params: any[] = []): Promise<boolea
  * The wrangler CLI fallback only works on a developer machine. In production
  * (Vercel etc.) fail loudly with an actionable message instead of silently.
  */
+/**
+ * Execute a write statement and return the number of rows it changed.
+ * Used for atomic compare-and-set updates (e.g. rate limits).
+ */
+export async function executeD1Changes(sql: string, params: any[] = []): Promise<number> {
+  const db = await getD1();
+  if (db) {
+    const stmt = db.prepare(sql);
+    const bound = params.length > 0 ? stmt.bind(...params) : stmt;
+    const res = await bound.run();
+    return Number(res?.meta?.changes ?? 0);
+  }
+
+  const result = await runCloudflareApi(sql, params);
+  if (result !== null) return Number(result[0]?.meta?.changes ?? 0);
+
+  assertLocalFallbackAllowed();
+  return await fallbackRemoteExecuteChanges(sql, params);
+}
+
 function assertLocalFallbackAllowed(): void {
   if (process.env.VERCEL || process.env.NODE_ENV === "production") {
     throw new Error(
@@ -180,3 +200,13 @@ async function fallbackRemoteExecute(sql: string, params: any[] = []): Promise<b
   }
 }
 
+async function fallbackRemoteExecuteChanges(sql: string, params: any[] = []): Promise<number> {
+  const { execSync } = await import("child_process");
+  const formattedSql = formatSqlWithParams(sql, params);
+  const output = execSync(
+    `npx wrangler d1 execute upstartica --remote --command "${formattedSql.replace(/"/g, '\\"')}" --json`,
+    { encoding: "utf-8", cwd: process.cwd() }
+  );
+  const parsed = JSON.parse(output);
+  return Number(parsed?.[0]?.meta?.changes ?? 0);
+}

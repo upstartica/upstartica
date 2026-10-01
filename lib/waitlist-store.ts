@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { queryD1, executeD1 } from "@/lib/d1";
+import { queryD1, executeD1, executeD1Changes } from "@/lib/d1";
 
 export type OtpRecord = {
   email: string;
@@ -27,30 +27,50 @@ export type WaitlistSubmissionRecord = {
   createdAt: string;
 };
 
-// Global memory stores to persist across HMR in Next.js development mode
-const globalStore = global as unknown as {
-  __waitlistOtpStore?: Map<string, OtpRecord>;
-  __waitlistVerifiedEmails?: Set<string>;
-  __waitlistSubmissions?: Map<string, WaitlistSubmissionRecord>;
-};
-
-if (!globalStore.__waitlistOtpStore) {
-  globalStore.__waitlistOtpStore = new Map();
-}
-if (!globalStore.__waitlistVerifiedEmails) {
-  globalStore.__waitlistVerifiedEmails = new Set();
-}
-if (!globalStore.__waitlistSubmissions) {
-  globalStore.__waitlistSubmissions = new Map();
-}
-
-const otpStore = globalStore.__waitlistOtpStore;
-const verifiedEmails = globalStore.__waitlistVerifiedEmails;
-const submissionsStore = globalStore.__waitlistSubmissions;
-
 const RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const VERIFIED_TTL_MS = 30 * 60 * 1000; // verified email stays valid for 30 minutes
 const MAX_VERIFY_ATTEMPTS = 5;
+
+// OTP / verification state lives in D1 (not process memory) so it works across
+// serverless instances (Vercel).
+let otpTableReady: Promise<void> | null = null;
+
+function ensureOtpTable(): Promise<void> {
+  if (!otpTableReady) {
+    otpTableReady = executeD1(
+      `CREATE TABLE IF NOT EXISTS waitlist_otp (
+        email TEXT PRIMARY KEY,
+        otp TEXT NOT NULL DEFAULT '',
+        expires_at INTEGER NOT NULL DEFAULT 0,
+        last_sent_at INTEGER NOT NULL DEFAULT 0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        verified_until INTEGER NOT NULL DEFAULT 0
+      )`
+    )
+      .then(() => undefined)
+      .catch((err) => {
+        otpTableReady = null;
+        throw err;
+      });
+  }
+  return otpTableReady;
+}
+
+type OtpRow = {
+  email: string;
+  otp: string;
+  expires_at: number;
+  last_sent_at: number;
+  attempts: number;
+  verified_until: number;
+};
+
+async function getOtpRow(email: string): Promise<OtpRow | null> {
+  await ensureOtpTable();
+  const rows = await queryD1<OtpRow>("SELECT * FROM waitlist_otp WHERE email = ?", [email]);
+  return rows[0] || null;
+}
 
 /**
  * Generates a secure random 4-digit numeric OTP (0000 - 9999)
@@ -62,104 +82,117 @@ export function generateRandomOtp(): string {
 
 /**
  * Creates and stores a new OTP for the given email address.
+ * The cooldown check and the write are a single atomic upsert, so concurrent
+ * requests cannot each get past the cooldown.
  */
-export function generateAndStoreOtp(rawEmail: string): {
+export async function generateAndStoreOtp(rawEmail: string): Promise<{
   otp: string;
   cooldownRemaining?: number;
   error?: string;
-} {
+}> {
   const email = rawEmail.toLowerCase().trim();
   const now = Date.now();
-
-  const existing = otpStore.get(email);
-  if (existing) {
-    const elapsed = now - existing.lastSentAt;
-    if (elapsed < RESEND_COOLDOWN_MS) {
-      const cooldownRemaining = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
-      return {
-        otp: "",
-        cooldownRemaining,
-        error: `Please wait ${cooldownRemaining} seconds before requesting a new OTP.`,
-      };
-    }
-  }
+  await ensureOtpTable();
 
   const otp = generateRandomOtp();
-  verifiedEmails.delete(email);
+  const changes = await executeD1Changes(
+    `INSERT INTO waitlist_otp (email, otp, expires_at, last_sent_at, attempts, verified_until)
+     VALUES (?, ?, ?, ?, 0, 0)
+     ON CONFLICT(email) DO UPDATE SET
+       otp = excluded.otp,
+       expires_at = excluded.expires_at,
+       last_sent_at = excluded.last_sent_at,
+       attempts = 0,
+       verified_until = 0
+     WHERE waitlist_otp.last_sent_at <= ?`,
+    [email, otp, now + OTP_TTL_MS, now, now - RESEND_COOLDOWN_MS]
+  );
 
-  otpStore.set(email, {
-    email,
-    otp,
-    expiresAt: now + OTP_TTL_MS,
-    lastSentAt: now,
-    attempts: 0,
-    verified: false,
-  });
+  if (changes === 0) {
+    const existing = await getOtpRow(email);
+    const elapsed = now - (existing?.last_sent_at ?? 0);
+    const cooldownRemaining = Math.max(1, Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000));
+    return {
+      otp: "",
+      cooldownRemaining,
+      error: `Please wait ${cooldownRemaining} seconds before requesting a new OTP.`,
+    };
+  }
 
   return { otp };
 }
 
 /**
- * Verifies the OTP submitted by the user.
+ * Removes a stored OTP, e.g. when the email could not be sent, so the user is
+ * not locked out by the resend cooldown.
  */
-export function verifyOtpCode(
+export async function discardOtp(rawEmail: string): Promise<void> {
+  const email = rawEmail.toLowerCase().trim();
+  await ensureOtpTable();
+  await executeD1("DELETE FROM waitlist_otp WHERE email = ?", [email]);
+}
+
+/**
+ * Verifies the OTP submitted by the user.
+ * Each guess is counted with an atomic UPDATE before it is compared, so
+ * parallel requests cannot exceed MAX_VERIFY_ATTEMPTS.
+ */
+export async function verifyOtpCode(
   rawEmail: string,
   submittedOtp: string
-): { success: boolean; error?: string } {
+): Promise<{ success: boolean; error?: string }> {
   const email = rawEmail.toLowerCase().trim();
   const cleanOtp = submittedOtp.trim();
-
-  const record = otpStore.get(email);
-  if (!record) {
-    return { success: false, error: "No OTP request found for this email. Please request a new OTP." };
-  }
-
   const now = Date.now();
+  await ensureOtpTable();
 
-  if (now > record.expiresAt) {
-    otpStore.delete(email);
-    return { success: false, error: "This OTP has expired. Please request a new OTP." };
-  }
+  const counted = await executeD1Changes(
+    `UPDATE waitlist_otp SET attempts = attempts + 1
+     WHERE email = ? AND otp != '' AND attempts < ? AND expires_at >= ?`,
+    [email, MAX_VERIFY_ATTEMPTS, now]
+  );
 
-  if (record.attempts >= MAX_VERIFY_ATTEMPTS) {
-    otpStore.delete(email);
+  if (counted === 0) {
+    const record = await getOtpRow(email);
+    if (!record || !record.otp) {
+      return { success: false, error: "No OTP request found for this email. Please request a new OTP." };
+    }
+    await executeD1("DELETE FROM waitlist_otp WHERE email = ?", [email]);
+    if (now > record.expires_at) {
+      return { success: false, error: "This OTP has expired. Please request a new OTP." };
+    }
     return { success: false, error: "Too many failed attempts. Please request a new OTP." };
   }
 
-  record.attempts += 1;
+  // Marks verified only if this exact OTP is still live; also makes the code single-use.
+  const verified = await executeD1Changes(
+    `UPDATE waitlist_otp SET otp = '', verified_until = ?
+     WHERE email = ? AND otp = ?`,
+    [now + VERIFIED_TTL_MS, email, cleanOtp]
+  );
 
-  if (record.otp !== cleanOtp) {
-    const remainingAttempts = MAX_VERIFY_ATTEMPTS - record.attempts;
+  if (verified === 0) {
+    const record = await getOtpRow(email);
+    const remainingAttempts = Math.max(0, MAX_VERIFY_ATTEMPTS - (record?.attempts ?? MAX_VERIFY_ATTEMPTS));
     return {
       success: false,
       error: `Invalid verification code. ${remainingAttempts} attempt(s) remaining.`,
     };
   }
 
-  record.verified = true;
-  verifiedEmails.add(email);
-  otpStore.delete(email);
-
   return { success: true };
 }
 
-export function isEmailVerifiedOnServer(rawEmail: string): boolean {
+export async function isEmailVerifiedOnServer(rawEmail: string): Promise<boolean> {
   const email = rawEmail.toLowerCase().trim();
-  return verifiedEmails.has(email);
+  const record = await getOtpRow(email);
+  return !!record && record.verified_until > Date.now();
 }
 
-export function resetEmailVerification(rawEmail: string): void {
+export async function resetEmailVerification(rawEmail: string): Promise<void> {
   const email = rawEmail.toLowerCase().trim();
-  verifiedEmails.delete(email);
-  otpStore.delete(email);
-}
-
-/**
- * Sync check if email has already registered on waitlist.
- */
-export function isEmailRegisteredOnWaitlist(rawEmail: string): boolean {
-  const email = rawEmail.toLowerCase().trim();
-  return submissionsStore.has(email);
+  await ensureOtpTable();
+  await executeD1("DELETE FROM waitlist_otp WHERE email = ?", [email]);
 }
 
 /**
@@ -228,31 +261,10 @@ export async function saveWaitlistSubmissionD1(
     return { success: false, error: "We could not save your registration right now. Please try again shortly." };
   }
 
-  const submission: WaitlistSubmissionRecord = {
-    ...data,
-    email,
-    id,
-    emailVerified: true,
-    createdAt: submittedAt,
-  };
-  submissionsStore.set(email, submission);
-
-  verifiedEmails.delete(email);
-  return { success: true, id };
-}
-
-export function saveWaitlistSubmission(
-  data: Omit<WaitlistSubmissionRecord, "id" | "createdAt" | "emailVerified">
-) {
-  const email = data.email.toLowerCase().trim();
-  const id = `wl_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-  const submission: WaitlistSubmissionRecord = {
-    ...data,
-    email,
-    id,
-    emailVerified: true,
-    createdAt: new Date().toISOString(),
-  };
-  submissionsStore.set(email, submission);
+  try {
+    await resetEmailVerification(email);
+  } catch (err: any) {
+    console.warn("Failed to clear waitlist verification state:", err.message);
+  }
   return { success: true, id };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateAndStoreOtp } from "@/lib/waitlist-store";
+import { generateAndStoreOtp, discardOtp } from "@/lib/waitlist-store";
 import { sendOtpEmail } from "@/lib/email-service";
 
 function isValidEmail(email: string): boolean {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const cleanEmail = email.trim().toLowerCase();
 
     // Generate & store OTP server-side
-    const result = generateAndStoreOtp(cleanEmail);
+    const result = await generateAndStoreOtp(cleanEmail);
 
     if (result.error) {
       return NextResponse.json(
@@ -39,6 +39,8 @@ export async function POST(request: Request) {
     const sendResult = await sendOtpEmail(cleanEmail, result.otp);
 
     if (!sendResult.success) {
+      // Don't leave the user stuck behind the resend cooldown for an email that never went out
+      await discardOtp(cleanEmail).catch((e) => console.error("discardOtp failed:", e));
       return NextResponse.json(
         {
           success: false,
@@ -56,9 +58,9 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Internal server error";
+    console.error("Waitlist send-otp error:", err);
     return NextResponse.json(
-      { success: false, message: errorMsg },
+      { success: false, message: "We could not send a verification code right now. Please try again shortly." },
       { status: 500 }
     );
   }
