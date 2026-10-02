@@ -44,6 +44,21 @@ export default function RootLayout({
         {/* <Preloader /> */}
         {/* <Navbar /> */}
         {children}
+        {/* Google Analytics */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-C1D8XCS85P"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+
+            gtag('config', 'G-C1D8XCS85P');
+          `}
+        </Script>
+        {/* Cloudflare Analytics */}
         <Script
           defer
           src="https://static.cloudflareinsights.com/beacon.min.js"
